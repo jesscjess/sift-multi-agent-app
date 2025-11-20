@@ -1,15 +1,25 @@
-# Multi-Agent Smart Shopping System
+# EcoScan - Smart Recycling Assistant
 
-AI-powered shopping assistant that compares prices across stores and recommends optimal purchasing strategies using a multi-agent architecture.
+AI-powered recycling guidance that helps you determine if items are actually recyclable in your area. Many plastics are labeled as recyclable but aren't accepted by local recycling programs - EcoScan provides location-specific guidance to help you make informed decisions.
 
 ## Overview
 
-This system uses Google's ADK (Agent Development Kit) to orchestrate multiple specialized agents:
+EcoScan uses Google's ADK (Agent Development Kit) to orchestrate multiple specialized agents that analyze items and provide accurate, location-based recycling information:
 
 - **Orchestrator Agent**: Coordinates the workflow and manages agent interactions
-- **Product Normalizer Agent**: Finds and normalizes product data across stores
-- **Optimizer Agent**: Calculates price differences and identifies savings opportunities
-- **Evaluator Agent**: Recommends the best shopping strategy based on multiple factors
+- **Product Intelligence Agent**: Identifies material types and plastic codes from descriptions or images
+- **Location Agent**: Looks up location-specific recycling regulations
+- **Synthesis Agent**: Provides specific instructions and tips on which plastic codes to watch for
+
+## The Problem
+
+Not all "recyclable" plastics are actually recycled:
+- Different municipalities accept different materials
+- Plastic codes (PETE #1, HDPE #2, etc.) have varying acceptance rates
+- Many items labeled with recycling symbols aren't accepted locally
+- Composite materials and contaminated items often can't be recycled
+
+**EcoScan solves this** by providing accurate, location-specific recycling guidance.
 
 ## Quick Start
 
@@ -47,6 +57,13 @@ streamlit run app.py
 
 The application will open in your browser at `http://localhost:8501`
 
+### First-Time Setup
+
+On your first use, you'll be prompted to set up your profile:
+1. Enter your location (zip code or city)
+2. Your local recycling rules will be stored for future queries
+3. Start scanning items!
+
 ## Project Structure
 
 ```
@@ -54,9 +71,9 @@ multi-agent-smart-shopper/
 ├── agents/                      # Agent implementations
 │   ├── __init__.py
 │   ├── orchestrator.py         # Main coordinator agent
-│   ├── product_normalizer.py   # Product search and normalization
-│   ├── optimizer.py            # Price comparison and optimization
-│   └── evaluator.py            # Recommendation engine
+│   ├── product_intelligence.py # Material analysis
+│   ├── location.py             # Local rules lookup
+│   └── synthesis.py            # Recommendations
 ├── app.py                       # Streamlit chat interface
 ├── requirements.txt             # Python dependencies
 ├── CLAUDE.md                    # Documentation for Claude Code
@@ -66,39 +83,74 @@ multi-agent-smart-shopper/
 
 ## Usage Examples
 
-Once the agents are fully implemented, you can ask questions like:
+Once fully implemented, you can ask questions like:
 
-- "Find the cheapest place to buy milk and eggs"
-- "Compare prices for apples across all stores"
-- "Where should I buy bread, butter, and jam to save the most?"
-- "Is it worth shopping at multiple stores for my grocery list?"
+**Text Queries:**
+- "Is this plastic bottle recyclable in my area?"
+- "Can I recycle HDPE #2 containers?"
+- "What plastic codes should I avoid?"
+- "Is styrofoam recyclable near me?"
+
+**Image Upload:**
+- Upload a photo of the recycling symbol
+- Upload a picture of the product packaging
+- Scan the resin identification code
+
+**Example Response:**
+```
+♻️ Material Identified: PETE #1 (Polyethylene Terephthalate)
+
+✅ Recyclable in your area (San Francisco, CA)
+
+Instructions:
+1. Rinse the container thoroughly
+2. Remove the cap (HDPE #2 - also recyclable)
+3. Place in your blue recycling bin
+4. Do not flatten - recycling machines sort by shape
+
+💡 Tips to Remember:
+- PETE #1 and HDPE #2 are widely accepted
+- Avoid PVC #3 and PS #6 (rarely recycled)
+- Check for the "Recycle Ready" symbol
+- When in doubt, check with your local facility
+```
 
 ## Development Status
 
-🚧 **In Development** - This project is currently being built for a hackathon.
+🚧 **In Development** - This project is being built for a hackathon.
 
 **Completed:**
 - ✅ Project structure and architecture
 - ✅ Agent skeleton files
-- ✅ Streamlit chat interface
+- ✅ Streamlit chat interface foundation
+- ✅ Documentation and planning
 
 **In Progress:**
 - 🔄 Agent implementations with Google ADK
-- 🔄 Store integrations
-- 🔄 Price comparison logic
+- 🔄 User profile system
+- 🔄 Material identification system
+- 🔄 Recycling database integration
 
 ## Architecture
 
 The system follows a sequential multi-agent workflow:
 
-1. User submits query via chat interface
-2. Orchestrator analyzes and routes the request
-3. Product Normalizer finds products across stores
-4. Optimizer calculates price differences and savings
-5. Evaluator recommends optimal purchasing strategy
-6. Results are returned to the user
+1. User submits item (description or image) via chat interface
+2. User profile provides location data
+3. Orchestrator analyzes and routes the request
+4. Product Intelligence Agent identifies the material type and codes
+5. Location Agent checks recycling regulations for that location
+6. Synthesis Agent generates specific instructions and tips
+7. Results are returned to the user
 
 See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation.
+
+## Why This Matters
+
+- **Environmental Impact**: Proper recycling reduces waste and pollution
+- **Contamination Prevention**: Placing non-recyclables in bins contaminates entire batches
+- **Informed Decisions**: Knowledge helps consumers choose better products
+- **Education**: Understanding plastic codes empowers better purchasing
 
 ## Contributing
 

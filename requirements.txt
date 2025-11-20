@@ -14,3 +14,7 @@ requests
 
 # Data processing
 pandas
+
+# Image processing (for recycling symbol recognition)
+Pillow
+opencv-python

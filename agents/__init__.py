@@ -1,13 +1,13 @@
-"""Multi-Agent Smart Shopping System"""
+"""EcoScan Multi-Agent Recycling System"""
 
 from .orchestrator import OrchestratorAgent
-from .product_normalizer import ProductNormalizerAgent
-from .optimizer import OptimizerAgent
-from .evaluator import EvaluatorAgent
+from .product_intelligence import ProductIntelligenceAgent
+from .location import LocationAgent
+from .synthesis import SynthesisAgent
 
 __all__ = [
     "OrchestratorAgent",
-    "ProductNormalizerAgent",
-    "OptimizerAgent",
-    "EvaluatorAgent",
+    "ProductIntelligenceAgent",
+    "LocationAgent",
+    "SynthesisAgent",
 ]
