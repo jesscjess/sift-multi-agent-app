@@ -1,0 +1,16 @@
+# Google Agent Development Kit
+google-adk
+
+# Frontend
+streamlit
+
+# Utilities
+python-dotenv
+pydantic
+
+# HTTP requests (for potential API integrations)
+httpx
+requests
+
+# Data processing
+pandas
