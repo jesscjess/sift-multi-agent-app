@@ -20,8 +20,10 @@ Building a multi-agent system using Google's ADK framework with:
 ### Phase 1: Setup & Architecture
 - [x] Define the 3 subagent roles and capabilities
 - [x] Create CLAUDE.md documentation for future development
-- [ ] Set up project structure and ADK installation
-- [ ] Design the orchestrator agent architecture
+- [x] Set up project structure (agents/, app.py, requirements.txt)
+- [x] Create skeleton agent classes with method stubs
+- [x] Set up Streamlit chat interface
+- [ ] Install and configure Google ADK
 - [ ] Define data models for products, stores, and prices
 - [ ] Design API contracts between agents
 
