@@ -100,3 +100,148 @@ class LocationAgent:
         # 4. Return standardized location format
 
         return None
+
+    def get_recycling_info(self, location: str) -> Dict[str, Any]:
+        """
+        Get complete recycling facility information for a location.
+        Called by orchestrator during initial setup and location updates.
+
+        Args:
+            location: User's location (city, state, or zip code)
+
+        Returns:
+            Dict containing recycling facility details and accepted materials
+        """
+        # TODO: Implement actual location lookup with real data source
+        # For now, return mock data based on example structure
+
+        # Mock database of recycling programs by location
+        mock_database = {
+            "94612": {
+                "zip_code": "94612",
+                "municipality": "Oakland",
+                "state": "CA",
+                "local_authority": {
+                    "name": "Oakland Recycles",
+                    "website": "https://www.oaklandrecycles.com/",
+                    "phone": "510-238-7283"
+                },
+                "curbside_recycling": {
+                    "accepts": [
+                        "PET #1",
+                        "HDPE #2",
+                        "paper",
+                        "cardboard",
+                        "aluminum",
+                        "steel cans",
+                        "glass bottles"
+                    ],
+                    "rejects": [
+                        "PP #5",
+                        "PS #6",
+                        "plastic bags",
+                        "styrofoam",
+                        "food waste"
+                    ],
+                    "special_instructions": {
+                        "PET #1": "Rinse and keep lid on",
+                        "HDPE #2": "Rinse and keep lid on",
+                        "glass": "No broken glass"
+                    }
+                },
+                "confidence": 0.98
+            },
+            "94102": {
+                "zip_code": "94102",
+                "municipality": "San Francisco",
+                "state": "CA",
+                "local_authority": {
+                    "name": "Recology",
+                    "website": "https://www.recology.com/",
+                    "phone": "415-330-1300"
+                },
+                "curbside_recycling": {
+                    "accepts": [
+                        "PET #1",
+                        "HDPE #2",
+                        "PP #5",
+                        "paper",
+                        "cardboard",
+                        "aluminum",
+                        "glass"
+                    ],
+                    "rejects": [
+                        "PS #6",
+                        "PVC #3",
+                        "plastic bags",
+                        "styrofoam"
+                    ],
+                    "special_instructions": {
+                        "PET #1": "Rinse thoroughly",
+                        "HDPE #2": "Remove caps",
+                        "PP #5": "Check local guidelines"
+                    }
+                },
+                "confidence": 0.95
+            },
+            "97201": {
+                "zip_code": "97201",
+                "municipality": "Portland",
+                "state": "OR",
+                "local_authority": {
+                    "name": "Portland Recycles",
+                    "website": "https://www.portlandoregon.gov/bps/recycle/",
+                    "phone": "503-823-7202"
+                },
+                "curbside_recycling": {
+                    "accepts": [
+                        "PET #1",
+                        "HDPE #2",
+                        "PP #5",
+                        "glass",
+                        "aluminum",
+                        "paper",
+                        "cardboard"
+                    ],
+                    "rejects": [
+                        "PS #6",
+                        "PVC #3",
+                        "LDPE #4",
+                        "plastic bags",
+                        "styrofoam",
+                        "mixed plastics #7"
+                    ],
+                    "special_instructions": {
+                        "glass": "Separate by color if possible",
+                        "PET #1": "Rinse and flatten",
+                        "HDPE #2": "Rinse well"
+                    }
+                },
+                "confidence": 0.97
+            }
+        }
+
+        # Try to extract zip code from location string
+        location_clean = location.strip()
+
+        # Check if it's a direct zip code match
+        if location_clean in mock_database:
+            return mock_database[location_clean]
+
+        # Check if location contains a zip code
+        for zip_code, data in mock_database.items():
+            if zip_code in location_clean:
+                return data
+
+        # Check for city name matches
+        location_lower = location_clean.lower()
+        for zip_code, data in mock_database.items():
+            municipality = data.get("municipality", "").lower()
+            if municipality in location_lower or location_lower in municipality:
+                return data
+
+        # Location not found in database
+        return {
+            "status": "error",
+            "message": f"No recycling information found for '{location}'. Currently supporting: Oakland CA (94612), San Francisco CA (94102), Portland OR (97201)"
+        }

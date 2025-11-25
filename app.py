@@ -65,10 +65,26 @@ if not st.session_state.user_profile["setup_complete"]:
         submitted = st.form_submit_button("Save Location")
 
         if submitted and location_input:
-            st.session_state.user_profile["location"] = location_input
-            st.session_state.user_profile["setup_complete"] = True
-            st.success(f"✅ Profile saved! Location set to: {location_input}")
-            st.rerun()
+            # Call orchestrator to get recycling facility info and save to memory
+            with st.spinner("Looking up recycling information for your area..."):
+                result = st.session_state.orchestrator.process_request(
+                    user_query="location_setup",
+                    user_location=location_input,
+                    request_type="location_setup"
+                )
+
+            if result.get("status") == "success":
+                # Save location to profile
+                st.session_state.user_profile["location"] = location_input
+                location_data = result.get("location_data", {})
+                st.session_state.user_profile["zip_code"] = location_data.get("zip_code")
+                st.session_state.user_profile["setup_complete"] = True
+
+                # Display location information
+                st.success(result.get("message"))
+                st.rerun()
+            else:
+                st.error(result.get("message", "Failed to retrieve location information"))
         elif submitted:
             st.error("Please enter a valid location")
 
@@ -79,9 +95,41 @@ if st.session_state.user_profile["setup_complete"]:
         st.header("Your Profile")
         st.write(f"📍 **Location:** {st.session_state.user_profile['location']}")
 
+        # Initialize location update state
+        if "updating_location" not in st.session_state:
+            st.session_state.updating_location = False
+
         if st.button("Change Location"):
-            st.session_state.user_profile["setup_complete"] = False
-            st.rerun()
+            st.session_state.updating_location = not st.session_state.updating_location
+
+        # Show location update form if button clicked
+        if st.session_state.updating_location:
+            with st.form("location_update_form"):
+                new_location = st.text_input(
+                    "New location",
+                    placeholder="e.g., Portland, OR or 97201"
+                )
+                update_submitted = st.form_submit_button("Update")
+
+                if update_submitted and new_location:
+                    with st.spinner("Updating location and retrieving recycling info..."):
+                        result = st.session_state.orchestrator.process_request(
+                            user_query="location_update",
+                            user_location=new_location,
+                            request_type="location_update"
+                        )
+
+                    if result.get("status") == "success":
+                        st.session_state.user_profile["location"] = new_location
+                        location_data = result.get("location_data", {})
+                        st.session_state.user_profile["zip_code"] = location_data.get("zip_code")
+                        st.session_state.updating_location = False
+                        st.success("Location updated successfully!")
+                        st.rerun()
+                    else:
+                        st.error(result.get("message", "Failed to update location"))
+                elif update_submitted:
+                    st.error("Please enter a valid location")
 
         st.divider()
 
