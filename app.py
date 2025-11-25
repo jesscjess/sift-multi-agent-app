@@ -7,6 +7,7 @@ from agents import (
     LocationAgent,
     SynthesisAgent,
 )
+from memory_service import MemoryService
 
 # Page configuration
 st.set_page_config(
@@ -27,18 +28,22 @@ if "user_profile" not in st.session_state:
         "setup_complete": False
     }
 
-# Initialize agents (singleton pattern)
+# Initialize agents and memory service (singleton pattern)
 if "orchestrator" not in st.session_state:
+    # Step 1: Initialize MemoryService
+    memory_service = MemoryService(storage_path="data/ecoscan_memory.json")
+
     # Create specialized agents
     product_intelligence = ProductIntelligenceAgent()  # Material analysis
     location = LocationAgent()  # Local recycling rules
     synthesis = SynthesisAgent()  # Recommendations and tips
 
-    # Create and initialize orchestrator
-    orchestrator = OrchestratorAgent()
+    # Create and initialize orchestrator with memory service
+    orchestrator = OrchestratorAgent(memory_service=memory_service)
     orchestrator.initialize_agents(product_intelligence, location, synthesis)
 
     st.session_state.orchestrator = orchestrator
+    st.session_state.memory_service = memory_service
 
 # App header
 st.title("♻️ EcoScan")
@@ -60,10 +65,26 @@ if not st.session_state.user_profile["setup_complete"]:
         submitted = st.form_submit_button("Save Location")
 
         if submitted and location_input:
-            st.session_state.user_profile["location"] = location_input
-            st.session_state.user_profile["setup_complete"] = True
-            st.success(f"✅ Profile saved! Location set to: {location_input}")
-            st.rerun()
+            # Call orchestrator to get recycling facility info and save to memory
+            with st.spinner("Looking up recycling information for your area..."):
+                result = st.session_state.orchestrator.process_request(
+                    user_query="location_setup",
+                    user_location=location_input,
+                    request_type="location_setup"
+                )
+
+            if result.get("status") == "success":
+                # Save location to profile
+                st.session_state.user_profile["location"] = location_input
+                location_data = result.get("location_data", {})
+                st.session_state.user_profile["zip_code"] = location_data.get("zip_code")
+                st.session_state.user_profile["setup_complete"] = True
+
+                # Display location information
+                st.success(result.get("message"))
+                st.rerun()
+            else:
+                st.error(result.get("message", "Failed to retrieve location information"))
         elif submitted:
             st.error("Please enter a valid location")
 
@@ -74,9 +95,41 @@ if st.session_state.user_profile["setup_complete"]:
         st.header("Your Profile")
         st.write(f"📍 **Location:** {st.session_state.user_profile['location']}")
 
+        # Initialize location update state
+        if "updating_location" not in st.session_state:
+            st.session_state.updating_location = False
+
         if st.button("Change Location"):
-            st.session_state.user_profile["setup_complete"] = False
-            st.rerun()
+            st.session_state.updating_location = not st.session_state.updating_location
+
+        # Show location update form if button clicked
+        if st.session_state.updating_location:
+            with st.form("location_update_form"):
+                new_location = st.text_input(
+                    "New location",
+                    placeholder="e.g., Portland, OR or 97201"
+                )
+                update_submitted = st.form_submit_button("Update")
+
+                if update_submitted and new_location:
+                    with st.spinner("Updating location and retrieving recycling info..."):
+                        result = st.session_state.orchestrator.process_request(
+                            user_query="location_update",
+                            user_location=new_location,
+                            request_type="location_update"
+                        )
+
+                    if result.get("status") == "success":
+                        st.session_state.user_profile["location"] = new_location
+                        location_data = result.get("location_data", {})
+                        st.session_state.user_profile["zip_code"] = location_data.get("zip_code")
+                        st.session_state.updating_location = False
+                        st.success("Location updated successfully!")
+                        st.rerun()
+                    else:
+                        st.error(result.get("message", "Failed to update location"))
+                elif update_submitted:
+                    st.error("Please enter a valid location")
 
         st.divider()
 
@@ -138,36 +191,22 @@ if st.session_state.user_profile["setup_complete"]:
         # Get assistant response
         with st.chat_message("assistant"):
             with st.spinner("Analyzing recyclability..."):
-                # Process request through orchestrator
-                result = st.session_state.orchestrator.process_request(prompt)
+                # Process request through orchestrator with user location
+                result = st.session_state.orchestrator.process_request(
+                    user_query=prompt,
+                    user_location=st.session_state.user_profile.get("location")
+                )
 
-                # Format response (temporary until agents are implemented)
-                if result.get("status") == "not_implemented":
-                    response = f"""I'm analyzing your item for recycling! ♻️
-
-**Your query:** {prompt}
-**Your location:** {st.session_state.user_profile['location']}
-
-The EcoScan multi-agent system will:
-1. 🔍 **Identify the material** type and plastic codes
-2. 📍 **Check local rules** for your area
-3. ✅ **Provide instructions** on how to recycle it properly
-
-*Note: Agent implementation is in progress. Soon I'll provide accurate, location-specific recycling guidance!*
-
-**Common tips while we're building:**
-- PETE #1 and HDPE #2 are widely accepted
-- Always rinse containers before recycling
-- Remove caps and labels when possible
-- When in doubt, check your local recycling program
-"""
-                else:
-                    response = result.get("message", "Something went wrong")
+                # Get response from result
+                response = result.get("message", "Something went wrong")
 
                 st.markdown(response)
 
         # Add assistant message to chat history
         st.session_state.messages.append({"role": "assistant", "content": response})
+
+        # NOTE: We do NOT save recyclability checks to memory
+        # Only location agent responses are saved 
 
 else:
     # Show welcome message if profile not set up
