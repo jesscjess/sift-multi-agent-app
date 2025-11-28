@@ -1,345 +1,390 @@
-"""Orchestrator Agent - Main coordinator for routing requests and managing subagent interactions"""
-
+# agents/orchestrator.py
+"""
+Orchestrator Agent - Coordinates the EcoScan workflow for Streamlit
+"""
 from typing import Dict, Any, Optional
+from google.adk import Agent
+from google.adk.models import Gemini
+from google.adk.runners import InMemoryRunner
+from config.settings import settings
+import json
+import asyncio
+import nest_asyncio
+
+
+def create_orchestrator_agent() -> Agent:
+    """Factory function to create the intent-parsing orchestrator agent."""
+    return Agent(
+        name="IntentOrchestratorAgent",
+        model=Gemini(
+            model=settings.DEFAULT_MODEL,
+        ),
+        description="Analyzes user queries to determine intent and extract product information for recycling guidance.",
+        instruction="""
+        You are an intent analyzer for EcoScan, a recycling guidance system.
+
+        Your job is to understand what the user is asking and extract relevant information.
+
+        ## Response Format:
+
+        **For product/recyclability queries:**
+        ```json
+        {
+        "intent": "check_recyclability",
+        "product": "extracted product name or description",
+        "confidence": 0.95
+        }
+        ```
+
+        **For general questions:**
+        ```json
+        {
+        "intent": "general_question",
+        "question_type": "how_to_recycle|what_is_ric|local_info",
+        "details": "extracted details"
+        }
+        ```
+
+        **For unclear input:**
+        ```json
+        {
+        "intent": "unclear",
+        "message": "What would you like to know about recycling?"
+        }
+        ```
+
+        ## Rules:
+        - Extract the most specific product name/description possible
+        - Identify plastic codes if mentioned (e.g., "#1", "PETE", "PS #6")
+        - Be conversational but always respond in valid JSON format
+        - Handle casual language naturally
+        """,
+        tools=[]
+    )
 
 
 class OrchestratorAgent:
     """
-    Main coordinator that routes user recycling queries to appropriate subagents
-    and aggregates results for final recommendation.
+    Main orchestrator that coordinates between agents and manages workflow.
+    Designed to work with Streamlit's synchronous interface.
     """
-
-    def __init__(self, memory_service: Optional[Any] = None):
+    
+    def __init__(self, memory_service=None):
         """
-        Initialize the orchestrator with references to subagents and memory service.
-
+        Initialize the orchestrator.
+        
         Args:
-            memory_service: Optional MemoryService instance for long-term memory
+            memory_service: MemoryService instance for storing/retrieving data
         """
-        self.product_intelligence = None  # ProductIntelligenceAgent
-        self.location = None  # LocationAgent
-        self.synthesis = None  # SynthesisAgent
-        self.memory_service = memory_service  # MemoryService for storing/retrieving past interactions
-
-    def process_request(self, user_query: str, user_location: str = None, request_type: str = "recyclability_check") -> Dict[str, Any]:
+        self.memory_service = memory_service
+        self.intent_agent = None
+        self.product_agent = None
+        self.location_agent = None
+        self.synthesis_agent = None
+        
+        # Initialize intent parsing agent
+        self._setup_intent_agent()
+    
+    def _setup_intent_agent(self):
+        """Set up the intent parsing ADK agent."""
+        agent = create_orchestrator_agent()
+        self.intent_agent = InMemoryRunner(agent=agent)
+    
+    def initialize_agents(
+        self,
+        product_agent,
+        location_agent,
+        synthesis_agent
+    ):
         """
-        Process user recycling query through the multi-agent pipeline.
-
+        Initialize specialized agents.
+        
         Args:
-            user_query: User's recycling question (e.g., "Is this PETE #1 bottle recyclable?")
-            user_location: User's location for local recycling rules
-            request_type: Type of request - "location_setup", "location_update", or "recyclability_check"
-
-        Returns:
-            Dict containing recyclability analysis and recommendations
+            product_agent: ProductIntelligenceAgent instance
+            location_agent: LocationAgent instance
+            synthesis_agent: SynthesisAgent instance
         """
-        # Handle location setup/update requests
-        if request_type in ["location_setup", "location_update"]:
-            return self._handle_location_setup(user_location, is_update=(request_type == "location_update"))
-
-        # Handle recyclability check requests
-        return self._handle_recyclability_check(user_query, user_location)
-
-    def _handle_location_setup(self, user_location: str, is_update: bool = False) -> Dict[str, Any]:
-        """
-        Handle location setup or update by calling Location Agent and saving to memory.
-
-        Args:
-            user_location: User's location (city, state or zip code)
-            is_update: True if updating existing location, False if first-time setup
-
-        Returns:
-            Dict containing location data and recycling facility information
-        """
-        if not user_location:
-            return {
-                "status": "error",
-                "message": "No location provided. Please enter your city or zip code."
-            }
-
-        # Call Location Agent to get recycling facility information
-        # TODO: Location Agent will implement get_recycling_info() method
-        if not self.location:
-            return {
-                "status": "error",
-                "message": "Location agent not initialized"
-            }
-
-        try:
-            # Get recycling facility data from Location Agent
-            location_data = self.location.get_recycling_info(user_location)
-
-            if not location_data or location_data.get("status") == "error":
-                return {
-                    "status": "error",
-                    "message": f"Could not find recycling information for {user_location}. Please check your location and try again."
-                }
-
-            # Save location data to long-term memory
-            if self.memory_service:
-                session_data = {
-                    "query_type": "location_update" if is_update else "location_setup",
-                    "user_location": user_location,
-                    "location_data": location_data,
-                    "action": "updated location" if is_update else "initial setup"
-                }
-
-                metadata = {
-                    "agent": "location_agent",
-                    "zip_code": location_data.get("zip_code"),
-                    "municipality": location_data.get("municipality"),
-                    "state": location_data.get("state"),
-                    "query_type": "location_setup"
-                }
-
-                self.memory_service.add_session_to_memory(
-                    session_data=session_data,
-                    user_id=user_location,
-                    metadata=metadata
-                )
-
-            # Return success with location data
-            return {
-                "status": "success",
-                "message": self._format_location_response(location_data, is_update),
-                "location_data": location_data,
-                "handled_by": ["location_agent"]
-            }
-
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": f"Error retrieving location information: {str(e)}"
-            }
-
-    def _format_location_response(self, location_data: Dict[str, Any], is_update: bool = False) -> str:
-        """
-        Format location data into user-friendly response.
-
-        Args:
-            location_data: Location and recycling facility data from Location Agent
-            is_update: Whether this is an update or initial setup
-
-        Returns:
-            Formatted string response for user
-        """
-        action = "updated" if is_update else "set up"
-        municipality = location_data.get("municipality", "your area")
-        state = location_data.get("state", "")
-        location_str = f"{municipality}, {state}" if state else municipality
-
-        authority = location_data.get("local_authority", {})
-        curbside = location_data.get("curbside_recycling", {})
-
-        response = f"✅ Location {action}! You're in **{location_str}**.\n\n"
-        response += f"**Your Local Recycling Program:**\n"
-
-        if authority:
-            response += f"- Provider: {authority.get('name', 'N/A')}\n"
-            if authority.get('website'):
-                response += f"- Website: {authority.get('website')}\n"
-            if authority.get('phone'):
-                response += f"- Phone: {authority.get('phone')}\n"
-
-        response += f"\n**Curbside Recycling Accepts:**\n"
-        accepts = curbside.get("accepts", [])
-        if accepts:
-            for item in accepts[:5]:  # Show first 5 items
-                response += f"- ✅ {item}\n"
-            if len(accepts) > 5:
-                response += f"- ...and {len(accepts) - 5} more items\n"
-
-        response += f"\n**Not Accepted:**\n"
-        rejects = curbside.get("rejects", [])
-        if rejects:
-            for item in rejects[:3]:  # Show first 3 items
-                response += f"- ❌ {item}\n"
-            if len(rejects) > 3:
-                response += f"- ...and {len(rejects) - 3} more items\n"
-
-        response += f"\n💡 Now you can ask me about specific items to see if they're recyclable in your area!"
-
-        return response
-
-    def _handle_recyclability_check(self, user_query: str, user_location: str) -> Dict[str, Any]:
-        """
-        Handle recyclability check by coordinating Product Intelligence, Location (via memory), and Synthesis agents.
-
-        Args:
-            user_query: User's question about an item
-            user_location: User's location
-
-        Returns:
-            Dict containing recyclability verdict and response
-        """
-        if not user_query:
-            return {
-                "status": "error",
-                "message": "Please provide an item to check for recyclability."
-            }
-
-        if not user_location:
-            return {
-                "status": "error",
-                "message": "Location not set. Please set up your location first."
-            }
-
-        try:
-            # Step 1: Call Product Intelligence Agent to identify material
-            # Using the existing analyze_item() method
-            if not self.product_intelligence:
-                return {
-                    "status": "error",
-                    "message": "Product Intelligence agent not initialized"
-                }
-
-            material_info = self.product_intelligence.analyze_item(item_description=user_query)
-
-            # Check if implementation is complete
-            if material_info.get("status") == "not_implemented":
-                return {
-                    "status": "not_implemented",
-                    "message": "Product Intelligence Agent not yet implemented. The agent needs to analyze items and identify materials."
-                }
-
-            # Step 2: Retrieve location data from memory
-            if not self.memory_service:
-                return {
-                    "status": "error",
-                    "message": "Memory service not available. Cannot retrieve location data."
-                }
-
-            # Search memory for location data
-            location_memories = self.memory_service.search_memory(
-                user_id=user_location,
-                filters={"agent": "location_agent"},
-                limit=1
-            )
-
-            if not location_memories:
-                # Fallback: try to get location data directly from Location Agent
-                if self.location:
-                    location_data = self.location.get_recycling_info(user_location)
-                    if location_data.get("status") == "error":
-                        return {
-                            "status": "error",
-                            "message": f"No recycling information found for {user_location}. Please update your location."
-                        }
-                else:
-                    return {
-                        "status": "error",
-                        "message": "No location data found in memory. Please set up your location first."
-                    }
-            else:
-                # Get location data from memory
-                location_data = location_memories[0].get("session_data", {}).get("location_data", {})
-
-            # Step 3: Call Synthesis Agent to generate response
-            # Using the existing generate_recommendation() method
-            if not self.synthesis:
-                return {
-                    "status": "error",
-                    "message": "Synthesis agent not initialized"
-                }
-
-            synthesis_result = self.synthesis.generate_recommendation(
-                material_info=material_info,
-                recyclability_info=location_data
-            )
-
-            # Check if implementation is complete
-            if synthesis_result.get("status") == "not_implemented":
-                return {
-                    "status": "not_implemented",
-                    "message": "Synthesis Agent not yet implemented. The agent needs to generate recommendations based on material and location data."
-                }
-
-            # Format the response from synthesis result
-            response_message = synthesis_result.get("recommendation", "No recommendation generated")
-
-            return {
-                "status": "success",
-                "message": response_message,
-                "material_info": material_info,
-                "location_checked": location_data.get("municipality", "your area"),
-                "handled_by": ["product_intelligence", "synthesis"]
-            }
-
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": f"Error processing recyclability check: {str(e)}"
-            }
-
-    def initialize_agents(self, product_intelligence, location, synthesis):
-        """
-        Initialize subagent references.
-
-        Args:
-            product_intelligence: ProductIntelligenceAgent instance
-            location: LocationAgent instance
-            synthesis: SynthesisAgent instance
-        """
-        self.product_intelligence = product_intelligence
-        self.location = location
-        self.synthesis = synthesis
-
-    def save_to_memory(
+        self.product_agent = product_agent
+        self.location_agent = location_agent
+        self.synthesis_agent = synthesis_agent
+    
+    def process_request(
         self,
         user_query: str,
-        response: str,
-        user_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> bool:
+        user_location: Optional[str] = None,
+        request_type: str = "recyclability_check"
+    ) -> Dict[str, Any]:
         """
-        Helper method to save interaction to long-term memory.
-
+        Main entry point for processing user requests.
+        Synchronous wrapper for Streamlit compatibility.
+        
         Args:
-            user_query: The user's question or request
-            response: The assistant's response
-            user_id: Optional user identifier
-            metadata: Optional metadata (location, tags, etc.)
-
+            user_query: The user's question or input
+            user_location: User's location (city or zip code)
+            request_type: Type of request (recyclability_check, location_setup, location_update)
+            
         Returns:
-            True if successfully saved, False otherwise
+            Dict with status, message, and relevant data
         """
-        if not self.memory_service:
-            return False
-
-        session_data = {
-            "user_query": user_query,
-            "assistant_response": response,
-            "agent_type": "orchestrator"
-        }
-
-        return self.memory_service.add_session_to_memory(
-            session_data=session_data,
-            user_id=user_id,
-            metadata=metadata
-        )
-
-    def retrieve_relevant_memories(
+        try:
+            # Handle location setup/update separately
+            if request_type in ["location_setup", "location_update"]:
+                return self._handle_location_request(user_location, request_type)
+            
+            # Handle recyclability checks
+            return self._handle_recyclability_check(user_query, user_location)
+            
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': f'An error occurred: {str(e)}'
+            }
+    
+    def _handle_location_request(
         self,
-        query: Optional[str] = None,
-        user_id: Optional[str] = None,
-        limit: int = 5
-    ) -> list:
+        location: str,
+        request_type: str
+    ) -> Dict[str, Any]:
         """
-        Helper method to retrieve relevant past interactions from memory.
-
+        Handle location setup or update requests.
+        
         Args:
-            query: Optional search query
-            user_id: Optional user filter
-            limit: Maximum number of memories to retrieve
-
+            location: User's location input
+            request_type: "location_setup" or "location_update"
+            
         Returns:
-            List of relevant memory entries
+            Dict with status and location data
         """
-        if not self.memory_service:
-            return []
+        try:
+            # Extract zip code if needed
+            zip_code = self._extract_zip_code(location)
+            
+            if not zip_code:
+                return {
+                    'status': 'error',
+                    'message': 'Please provide a valid zip code or city name.'
+                }
+            
+            # Query location agent
+            print(f"📍 Looking up recycling info for: {zip_code}")
+            location_result = self.location_agent.run(zip_code)
+            location_data = self._parse_json_response(location_result)
+            
+            if not location_data.get('success', True):
+                return {
+                    'status': 'error',
+                    'message': f"Unable to find recycling information for {location}."
+                }
+            
+            # Save to memory
+            if self.memory_service:
+                self.memory_service.save_location_data(location_data)
+            
+            # Format success message
+            municipality = location_data.get('municipality', location)
+            state = location_data.get('state', '')
+            location_str = f"{municipality}, {state}" if state else municipality
+            
+            authority = location_data.get('local_authority', {})
+            authority_name = authority.get('name', 'your local recycling center')
+            
+            message = f"""
+✅ **Location saved: {location_str}**
 
-        return self.memory_service.search_memory(
-            query=query,
-            user_id=user_id,
-            limit=limit
-        )
+Your recycling is managed by **{authority_name}**.
+
+I'm ready to help you check if specific items are recyclable in your area!
+"""
+            
+            return {
+                'status': 'success',
+                'message': message.strip(),
+                'location_data': location_data
+            }
+            
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': f'Error processing location: {str(e)}'
+            }
+    
+    def _handle_recyclability_check(
+        self,
+        user_query: str,
+        user_location: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Handle recyclability check requests.
+        
+        Args:
+            user_query: User's question about recyclability
+            user_location: User's saved location
+            
+        Returns:
+            Dict with status and recommendation
+        """
+        try:
+            print("🎯 Step 1: Analyzing user intent...")
+
+            # Run intent agent asynchronously
+            try:
+                loop = asyncio.get_running_loop()
+                import nest_asyncio
+                nest_asyncio.apply()
+                intent_result = asyncio.run(self.intent_agent.run(user_query))
+            except RuntimeError:
+                intent_result = asyncio.run(self.intent_agent.run(user_query))
+            
+            intent_data = self._parse_json_response(intent_result)
+            
+            # Step 1: Parse intent
+            intent_result = self.intent_agent.run(user_query)
+            intent_data = self._parse_json_response(intent_result)
+            
+            intent = intent_data.get('intent')
+            
+            # Handle general questions
+            if intent == 'general_question':
+                return self._handle_general_question(intent_data)
+            
+            # Handle unclear intent
+            if intent == 'unclear':
+                return {
+                    'status': 'needs_clarification',
+                    'message': intent_data.get('message', 
+                        'What would you like to know about recycling? You can ask about specific products or plastic codes.')
+                }
+            
+            # Extract product info
+            product = intent_data.get('product')
+            if not product:
+                return {
+                    'status': 'needs_info',
+                    'message': 'What item would you like to check for recyclability?'
+                }
+            
+            # Step 2: Get product information
+            print(f"🔍 Step 2: Analyzing product: {product}")
+            product_result = self.product_agent.run(product)
+            product_data = self._parse_json_response(product_result)
+            
+            if not product_data.get('success', True):
+                return {
+                    'status': 'error',
+                    'message': f"I couldn't find specific recycling information for '{product}'. Could you provide more details or try a different product name?"
+                }
+            
+            # Step 3: Get location data from memory or query
+            print(f"📍 Step 3: Checking local recycling rules...")
+            location_data = self._get_location_data(user_location)
+            
+            if not location_data:
+                return {
+                    'status': 'needs_location',
+                    'message': 'I need your location to provide accurate recycling information. Please update your location in the sidebar.'
+                }
+            
+            # Step 4: Synthesize recommendation
+            print("🔄 Step 4: Generating recommendation...")
+            synthesis_result = self.synthesis_agent.generate_recommendation(
+                material_info=product_data,
+                recyclability_info=location_data
+            )
+            
+            # Format response for Streamlit
+            formatted_response = synthesis_result.get('recommendation', '')
+            if synthesis_result.get('details'):
+                formatted_response = synthesis_result['details'].get('formatted_response', formatted_response)
+            
+            return {
+                'status': 'success',
+                'message': formatted_response,
+                'product_data': product_data,
+                'location_data': location_data,
+                'recommendation': synthesis_result
+            }
+            
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': f'Error processing request: {str(e)}'
+            }
+    
+    def _handle_general_question(self, intent_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle general questions about recycling."""
+        question_type = intent_data.get('question_type')
+        
+        responses = {
+            'what_is_ric': """
+## Understanding Resin Identification Codes (RIC)
+
+RIC codes are the numbers (1-7) inside the recycling triangle symbol on plastic products. They identify the type of plastic resin:
+
+- **#1 PETE/PET**: Polyethylene Terephthalate (water bottles, soda bottles)
+- **#2 HDPE**: High-Density Polyethylene (milk jugs, detergent bottles)
+- **#3 PVC**: Polyvinyl Chloride (pipes, some packaging)
+- **#4 LDPE**: Low-Density Polyethylene (plastic bags, squeeze bottles)
+- **#5 PP**: Polypropylene (yogurt containers, bottle caps)
+- **#6 PS**: Polystyrene (foam cups, takeout containers)
+- **#7 Other**: All other plastics (mixed materials)
+
+⚠️ **Important**: Just because something has a recycling symbol doesn't mean it's accepted in your local recycling program!
+""",
+            'how_to_recycle': """
+## How to Recycle Properly
+
+1. **Check local guidelines** - What's recyclable varies by location
+2. **Clean containers** - Rinse food residue
+3. **Remove caps/lids** - Unless guidelines say otherwise
+4. **Flatten when possible** - Saves space
+5. **Don't bag recyclables** - Keep them loose in the bin
+6. **When in doubt, throw it out** - Contamination hurts recycling
+
+Ask me about a specific item to get detailed guidance for your area!
+"""
+        }
+        
+        message = responses.get(question_type, 
+            "I can help you check if specific items are recyclable in your area. What would you like to know?")
+        
+        return {
+            'status': 'success',
+            'message': message
+        }
+    
+    def _get_location_data(self, user_location: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Get location data from memory service."""
+        if not self.memory_service:
+            return None
+        
+        return self.memory_service.get_location_data()
+    
+    def _extract_zip_code(self, location: str) -> Optional[str]:
+        """Extract or lookup zip code from location string."""
+        import re
+        
+        # Check if it's already a zip code
+        zip_match = re.search(r'\b\d{5}\b', location)
+        if zip_match:
+            return zip_match.group()
+        
+        # For MVP, require explicit zip code
+        # In production, you'd use geocoding API to convert city name to zip
+        return None
+    
+    def _parse_json_response(self, response: Any) -> Dict[str, Any]:
+        """Parse JSON response from agents."""
+        try:
+            if isinstance(response, dict):
+                return response
+            
+            response_str = str(response).strip()
+            
+            # Remove markdown code blocks
+            if '```json' in response_str or '```' in response_str:
+                response_str = response_str.replace('```json', '').replace('```', '').strip()
+            
+            return json.loads(response_str)
+            
+        except json.JSONDecodeError:
+            return {'success': False, 'error': 'Unable to parse response'}

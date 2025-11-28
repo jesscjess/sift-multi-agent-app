@@ -7,6 +7,8 @@ from agents import (
     LocationAgent,
     SynthesisAgent,
 )
+# from services.memory_service import MemoryService  # Updated import path
+from config.settings import settings
 from memory_service import MemoryService
 
 # Page configuration
