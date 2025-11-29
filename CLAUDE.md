@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**EcoScan** - A multi-agent system using Google's ADK (Agent Development Kit) framework that helps users determine if items are recyclable in their area. Many plastics are labeled as recyclable but aren't actually accepted by local recycling programs. EcoScan provides location-specific recycling guidance to help users make informed purchasing decisions.
+**Sift** - A multi-agent system using Google's ADK (Agent Development Kit) framework that helps users determine if items are recyclable in their area. Many plastics are labeled as recyclable but aren't actually accepted by local recycling programs. Sift provides location-specific recycling guidance to help users make informed purchasing decisions.
 
 ## Architecture
 

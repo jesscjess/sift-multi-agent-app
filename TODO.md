@@ -1,7 +1,7 @@
-# EcoScan - Multi-Agent Recycling Assistant - TODO
+# Sift - Multi-Agent Recycling Assistant - TODO
 
 ## Project Overview
-Building **EcoScan**, a multi-agent system using Google's ADK framework that helps users determine if items are recyclable in their area. Many plastics are labeled as recyclable but aren't accepted by local programs.
+Building **Sift**, a multi-agent system using Google's ADK framework that helps users determine if items are recyclable in their area. Many plastics are labeled as recyclable but aren't accepted by local programs.
 
 **System Components:**
 - 1 Main orchestrator agent
@@ -30,7 +30,7 @@ Building **EcoScan**, a multi-agent system using Google's ADK framework that hel
 - [x] Set up project structure (agents/, app.py, requirements.txt)
 - [x] Create skeleton agent classes with method stubs
 - [x] Set up Streamlit chat interface
-- [x] Pivot to EcoScan concept and update documentation
+- [x] Pivot to Sift concept and update documentation
 - [ ] Install and configure Google ADK
 - [ ] Design user profile system for location storage
 - [ ] Define data models for materials, recycling rules, and locations
@@ -62,7 +62,7 @@ Building **EcoScan**, a multi-agent system using Google's ADK framework that hel
 
 ### Phase 3: Interface & Integration
 - [x] Create basic Streamlit chat interface
-- [ ] Update Streamlit interface for EcoScan branding
+- [ ] Update Streamlit interface for Sift branding
   - [ ] Add image upload capability
   - [ ] Update example queries for recycling
   - [ ] Add user profile setup flow

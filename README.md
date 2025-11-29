@@ -1,10 +1,10 @@
-# EcoScan - Smart Recycling Assistant
+# Sift - Smart Recycling Assistant
 
-AI-powered recycling guidance that helps you determine if items are actually recyclable in your area. Many plastics are labeled as recyclable but aren't accepted by local recycling programs - EcoScan provides location-specific guidance to help you make informed decisions.
+AI-powered recycling guidance that helps you determine if items are actually recyclable in your area. Many plastics are labeled as recyclable but aren't accepted by local recycling programs - Sift provides location-specific guidance to help you make informed decisions.
 
 ## Overview
 
-EcoScan uses Google's ADK (Agent Development Kit) to orchestrate multiple specialized agents that analyze items and provide accurate, location-based recycling information:
+Sift uses Google's ADK (Agent Development Kit) to orchestrate multiple specialized agents that analyze items and provide accurate, location-based recycling information:
 
 - **Orchestrator Agent**: Coordinates the workflow and manages agent interactions
 - **Product Intelligence Agent**: Identifies material types and plastic codes from descriptions or images
@@ -19,7 +19,7 @@ Not all "recyclable" plastics are actually recycled:
 - Many items labeled with recycling symbols aren't accepted locally
 - Composite materials and contaminated items often can't be recycled
 
-**EcoScan solves this** by providing accurate, location-specific recycling guidance.
+**Sift solves this** by providing accurate, location-specific recycling guidance.
 
 ## Quick Start
 

@@ -1,4 +1,4 @@
-"""EcoScan - Smart Recycling Assistant Chat Interface"""
+"""Sift - Smart Recycling Assistant Chat Interface"""
 
 import streamlit as st
 from agents import (
@@ -13,7 +13,7 @@ from memory_service import MemoryService
 
 # Page configuration
 st.set_page_config(
-    page_title="EcoScan - Smart Recycling Assistant",
+    page_title="Sift - Smart Recycling Assistant",
     page_icon="♻️",
     layout="centered"
 )
@@ -33,7 +33,7 @@ if "user_profile" not in st.session_state:
 # Initialize agents and memory service (singleton pattern)
 if "orchestrator" not in st.session_state:
     # Step 1: Initialize MemoryService
-    memory_service = MemoryService(storage_path="data/ecoscan_memory.json")
+    memory_service = MemoryService(storage_path="data/sift_memory.json")
 
     # Create specialized agents
     product_intelligence = ProductIntelligenceAgent()  # Material analysis
@@ -48,12 +48,12 @@ if "orchestrator" not in st.session_state:
     st.session_state.memory_service = memory_service
 
 # App header
-st.title("♻️ EcoScan")
+st.title("♻️ Sift")
 st.caption("Smart Recycling Assistant - Know what's actually recyclable in your area")
 
 # User profile setup (if not completed)
 if not st.session_state.user_profile["setup_complete"]:
-    st.info("👋 Welcome to EcoScan! Please set up your profile to get started.")
+    st.info("👋 Welcome to Sift! Please set up your profile to get started.")
 
     with st.form("profile_setup"):
         st.subheader("Profile Setup")
@@ -135,9 +135,9 @@ if st.session_state.user_profile["setup_complete"]:
 
         st.divider()
 
-        st.header("About EcoScan")
+        st.header("About Sift")
         st.info(
-            "EcoScan helps you determine if items are actually recyclable in your area. "
+            "Sift helps you determine if items are actually recyclable in your area. "
             "Many plastics labeled as recyclable aren't accepted by local programs."
         )
 
@@ -213,11 +213,11 @@ if st.session_state.user_profile["setup_complete"]:
 else:
     # Show welcome message if profile not set up
     st.write("")
-    st.write("### Why EcoScan?")
+    st.write("### Why Sift?")
     st.write(
         "Not all 'recyclable' plastics are actually recycled. "
         "Different cities accept different materials, and many items with recycling symbols "
-        "aren't accepted by local programs. EcoScan provides accurate, location-specific guidance."
+        "aren't accepted by local programs. Sift provides accurate, location-specific guidance."
     )
 
     col1, col2 = st.columns(2)
