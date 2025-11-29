@@ -9,7 +9,9 @@ from google.adk.runners import InMemoryRunner
 from config.settings import settings
 import json
 import asyncio
-import nest_asyncio
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
 
 
 def create_orchestrator_agent() -> Agent:
@@ -77,18 +79,34 @@ class OrchestratorAgent:
             memory_service: MemoryService instance for storing/retrieving data
         """
         self.memory_service = memory_service
-        self.intent_agent = None
         self.product_agent = None
         self.location_agent = None
         self.synthesis_agent = None
         
-        # Initialize intent parsing agent
+        # Initialize intent parsing agent - UPDATED
         self._setup_intent_agent()
-    
+
     def _setup_intent_agent(self):
         """Set up the intent parsing ADK agent."""
-        agent = create_orchestrator_agent()
-        self.intent_agent = InMemoryRunner(agent=agent)
+        self.intent_agent_def = create_orchestrator_agent()
+
+        # Create session service and runner for intent agent
+        self.intent_session_service = InMemorySessionService()
+        self.intent_runner = Runner(
+            agent=self.intent_agent_def,
+            app_name="agent",
+            session_service=self.intent_session_service
+        )
+
+        self.INTENT_USER_ID = "user_intent"
+        self.INTENT_SESSION_ID = "session_intent"
+
+        # Create session immediately during initialization (async call)
+        asyncio.run(self.intent_session_service.create_session(
+            app_name="agent",
+            user_id=self.INTENT_USER_ID,
+            session_id=self.INTENT_SESSION_ID
+        ))
     
     def initialize_agents(
         self,
@@ -108,6 +126,57 @@ class OrchestratorAgent:
         self.location_agent = location_agent
         self.synthesis_agent = synthesis_agent
     
+    def _run_intent_agent(self, user_query: str) -> Any:
+        """Run the intent agent synchronously."""
+        runner = InMemoryRunner(agent=self.intent_agent_def)
+        
+        try:
+            result = asyncio.run(runner.run(user_query))
+            return result
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(runner.run(user_query))
+                return result
+            finally:
+                loop.close()
+    
+    async def _execute_intent_agent(self, user_query: str):
+        """Internal async execution for intent agent."""
+        # Session was already created in __init__
+
+        # Create message
+        message = types.Content(role="user", parts=[types.Part(text=user_query)])
+
+        # Run and get response
+        async for event in self.intent_runner.run_async(
+            user_id=self.INTENT_USER_ID,
+            session_id=self.INTENT_SESSION_ID,
+            new_message=message
+        ):
+            if event.is_final_response():
+                response_text = event.content.parts[0].text
+                return response_text
+
+        # Fallback if no response
+        return "{}"
+    
+    def _run_intent_agent(self, user_query: str):
+        """Run the intent agent synchronously."""
+        try:
+            result = asyncio.run(self._execute_intent_agent(user_query))
+            return result
+        except RuntimeError:
+            # Event loop already running in Streamlit
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(self._execute_intent_agent(user_query))
+                return result
+            finally:
+                loop.close()
+
     def process_request(
         self,
         user_query: str,
@@ -135,6 +204,8 @@ class OrchestratorAgent:
             return self._handle_recyclability_check(user_query, user_location)
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return {
                 'status': 'error',
                 'message': f'An error occurred: {str(e)}'
@@ -162,7 +233,7 @@ class OrchestratorAgent:
             if not zip_code:
                 return {
                     'status': 'error',
-                    'message': 'Please provide a valid zip code or city name.'
+                    'message': 'Please provide a valid 5-digit zip code (e.g., 94102).'
                 }
             
             # Query location agent
@@ -173,12 +244,13 @@ class OrchestratorAgent:
             if not location_data.get('success', True):
                 return {
                     'status': 'error',
-                    'message': f"Unable to find recycling information for {location}."
+                    'message': f"Unable to find recycling information for {location}. {location_data.get('error', '')}"
                 }
             
+            # TODO: save this to mem
             # Save to memory
-            if self.memory_service:
-                self.memory_service.save_location_data(location_data)
+            # if self.memory_service:
+            #     self.memory_service.save_location_data(location_data)
             
             # Format success message
             municipality = location_data.get('municipality', location)
@@ -203,6 +275,8 @@ I'm ready to help you check if specific items are recyclable in your area!
             }
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return {
                 'status': 'error',
                 'message': f'Error processing location: {str(e)}'
@@ -224,21 +298,9 @@ I'm ready to help you check if specific items are recyclable in your area!
             Dict with status and recommendation
         """
         try:
-            print("🎯 Step 1: Analyzing user intent...")
-
-            # Run intent agent asynchronously
-            try:
-                loop = asyncio.get_running_loop()
-                import nest_asyncio
-                nest_asyncio.apply()
-                intent_result = asyncio.run(self.intent_agent.run(user_query))
-            except RuntimeError:
-                intent_result = asyncio.run(self.intent_agent.run(user_query))
-            
-            intent_data = self._parse_json_response(intent_result)
-            
             # Step 1: Parse intent
-            intent_result = self.intent_agent.run(user_query)
+            print("🎯 Step 1: Analyzing user intent...")
+            intent_result = self._run_intent_agent(user_query)
             intent_data = self._parse_json_response(intent_result)
             
             intent = intent_data.get('intent')
@@ -274,7 +336,7 @@ I'm ready to help you check if specific items are recyclable in your area!
                     'message': f"I couldn't find specific recycling information for '{product}'. Could you provide more details or try a different product name?"
                 }
             
-            # Step 3: Get location data from memory or query
+            # Step 3: Get location data from memory
             print(f"📍 Step 3: Checking local recycling rules...")
             location_data = self._get_location_data(user_location)
             
@@ -305,6 +367,8 @@ I'm ready to help you check if specific items are recyclable in your area!
             }
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return {
                 'status': 'error',
                 'message': f'Error processing request: {str(e)}'
@@ -369,7 +433,6 @@ Ask me about a specific item to get detailed guidance for your area!
             return zip_match.group()
         
         # For MVP, require explicit zip code
-        # In production, you'd use geocoding API to convert city name to zip
         return None
     
     def _parse_json_response(self, response: Any) -> Dict[str, Any]:
