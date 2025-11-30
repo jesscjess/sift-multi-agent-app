@@ -427,15 +427,17 @@ Ask me about a specific item to get detailed guidance for your area!
         if not self.memory_service:
             return None
 
-        # Search for most recent location data for this user
-        results = self.memory_service.search_memory(
-            user_id="default_user",
-            limit=1,
-            filters={"type": "location_data"}
+        # Get all memories for this user
+        all_memories = self.memory_service.get_recent_memories(
+            count=100,  # Get a reasonable number of recent memories
+            user_id="default_user"
         )
 
-        if results:
-            return results[0].get("session_data")
+        # Filter for location data and get the most recent one
+        for memory in all_memories:
+            metadata = memory.get("metadata", {})
+            if metadata.get("type") == "location_data":
+                return memory.get("session_data")
 
         return None
     
