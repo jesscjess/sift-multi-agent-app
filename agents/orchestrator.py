@@ -150,6 +150,7 @@ class OrchestratorAgent:
         message = types.Content(role="user", parts=[types.Part(text=user_query)])
 
         # Run and get response
+        response_text = None
         async for event in self.intent_runner.run_async(
             user_id=self.INTENT_USER_ID,
             session_id=self.INTENT_SESSION_ID,
@@ -157,10 +158,10 @@ class OrchestratorAgent:
         ):
             if event.is_final_response():
                 response_text = event.content.parts[0].text
-                return response_text
+                break  # Use break instead of return to properly close the generator
 
-        # Fallback if no response
-        return "{}"
+        # Return response or fallback
+        return response_text if response_text else "{}"
     
     def _run_intent_agent(self, user_query: str):
         """Run the intent agent synchronously."""
@@ -357,13 +358,15 @@ I'm ready to help you check if specific items are recyclable in your area!
             )
             
             # Format response for Streamlit
-            formatted_response = synthesis_result.get('recommendation', '')
-            if synthesis_result.get('details'):
-                formatted_response = synthesis_result['details'].get('formatted_response', formatted_response)
-            
+            # Extract plain text summary from synthesis result
+            final_message = synthesis_result.get('formatted_response', '')
+            if not final_message:
+                # Fallback if final_summary not present
+                final_message = synthesis_result.get('recommendation', 'Unable to generate recommendation')
+
             return {
                 'status': 'success',
-                'message': formatted_response,
+                'message': final_message,
                 'product_data': product_data,
                 'location_data': location_data,
                 'recommendation': synthesis_result
@@ -465,19 +468,3 @@ Ask me about a specific item to get detailed guidance for your area!
         except json.JSONDecodeError:
             return {'success': False, 'error': 'Unable to parse response'}
 
-
-            git commit -m "$(cat <<'EOF'
-Integrate existing memory service for location data persistence
-
-Changes:
-- Removed TODO and uncommented memory service integration in orchestrator
-- Updated save_location_data to use existing MemoryService.add_session_to_memory()
-- Updated get_location_data to use MemoryService.search_memory() with filters
-- Location data now stored with metadata: type="location_data" and zip_code
-- Uses default_user as user_id for MVP
-- Removed duplicate services/memory.py file (using root memory_service.py)
-
-The orchestrator now properly saves and retrieves location data using the
-existing memory service infrastructure that was already initialized in app.py.
-EOF
-)"

@@ -105,6 +105,7 @@ Rules:
         message = types.Content(role="user", parts=[types.Part(text=prompt)])
 
         # Run agent and collect response
+        response_text = None
         async for event in self.runner.run_async(
             user_id=self.USER_ID,
             session_id=self.SESSION_ID,
@@ -112,23 +113,26 @@ Rules:
         ):
             if event.is_final_response():
                 response_text = event.content.parts[0].text
+                break  # Use break instead of return to properly close the generator
 
-                # Try to parse as JSON
-                try:
-                    # Remove markdown code blocks if present
-                    if '```json' in response_text or '```' in response_text:
-                        response_text = response_text.replace('```json', '').replace('```', '').strip()
+        # Process response after generator is closed
+        if response_text:
+            # Try to parse as JSON
+            try:
+                # Remove markdown code blocks if present
+                if '```json' in response_text or '```' in response_text:
+                    response_text = response_text.replace('```json', '').replace('```', '').strip()
 
-                    parsed = json.loads(response_text)
-                    return parsed
-                except json.JSONDecodeError as e:
-                    print(f"❌ JSON parsing failed: {e}")
-                    print(f"Response content: {response_text}")
-                    return {
-                        "success": False,
-                        "error": "Failed to parse response",
-                        "raw_response": response_text
-                    }
+                parsed = json.loads(response_text)
+                return parsed
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON parsing failed: {e}")
+                print(f"Response content: {response_text}")
+                return {
+                    "success": False,
+                    "error": "Failed to parse response",
+                    "raw_response": response_text
+                }
 
         # If we get here, no final response was received
         return {

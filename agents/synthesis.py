@@ -1,33 +1,111 @@
 """
-Synthesis Agent - Combines product and location data to generate recommendations
+Synthesis Agent - AI-powered analysis combining product and location data
 """
-from typing import Dict, Any, List
+from typing import Dict, Any
+from google.adk.agents import Agent
+from google.adk.models import Gemini
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
+from config.settings import settings
+import asyncio
+import json
 
 
 class SynthesisAgent:
     """
-    Agent responsible for synthesizing information from Product and Location agents
-    to provide actionable recycling recommendations.
-    
-    MVP Scope: Plastic materials with RIC codes only
+    AI-powered agent that synthesizes product and location information
+    to provide intelligent recycling recommendations.
+
+    Uses Gemini to analyze complex recycling rules and edge cases.
     """
-    
+
     def __init__(self):
-        """Initialize the Synthesis Agent."""
+        """Initialize the AI-powered Synthesis Agent."""
         self.name = "SynthesisAgent"
-    
+
+        # Create the ADK agent
+        self.agent = Agent(
+            name="SynthesisAgent",
+            model=Gemini(
+                model=settings.DEFAULT_MODEL,
+            ),
+            description="Analyzes product materials against local recycling regulations to determine recyclability and generate specific instructions.",
+            instruction="""
+You are a recycling analysis expert. Your job is to determine if a product is recyclable based on:
+1. Product information (material type, RIC code)
+2. Local recycling regulations (accepted/rejected materials)
+
+You will receive two pieces of information:
+- Product data: Contains product name, material type, RIC code, and confidence
+- Location data: Contains municipality, accepted materials, rejected materials, and special instructions
+
+Your task:
+1. Compare the product's material/RIC code against the location's accepted/rejected lists
+2. Consider special instructions for that material
+3. Determine if the item is recyclable
+4. Generate step-by-step recycling instructions if recyclable
+5. Provide helpful tips if not recyclable
+
+**CRITICAL: Respond with ONLY raw JSON. No markdown, no code blocks, no extra text.**
+
+Response format:
+{
+  "is_recyclable": true/false,
+  "confidence": 0.95,
+  "reason": "Explanation of why it is or isn't recyclable",
+  "instructions": ["Step 1", "Step 2", "Step 3"],
+  "tips": ["Helpful tip 1", "Helpful tip 2"],
+  "formatted_response": "Full markdown-formatted response for user"
+}
+
+Rules:
+- Response must start with { and end with }
+- No ``` or ```json markers
+- confidence is a number 0-1 of how confident you feel about your output
+- instructions array should be empty if not recyclable
+- tips array can contain helpful information
+- formatted_response should be a complete, user-friendly markdown response
+- Be specific about local regulations when explaining decisions
+- Consider material variations (e.g., "PET #1", "1", "#1" are all the same)
+- If data is ambiguous, set lower confidence and explain uncertainty
+            """,
+            tools=[]  # No external tools needed - pure analysis
+        )
+
+        # Create session service and runner
+        self.session_service = InMemorySessionService()
+        self.runner = Runner(
+            agent=self.agent,
+            app_name="agents",
+            session_service=self.session_service
+        )
+
+        self.USER_ID = "user_synthesis"
+        self.SESSION_ID = "session_synthesis"
+
+        # Create session immediately during initialization
+        asyncio.run(self.session_service.create_session(
+            app_name="agents",
+            user_id=self.USER_ID,
+            session_id=self.SESSION_ID
+        ))
+
+        print(f"✅ SynthesisAgent initialized (AI-powered)")
+
     def run(
         self,
         product_info: Dict[str, Any],
         location_info: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Synthesize product and location information into recommendations.
-        
+        Synthesize product and location information using AI analysis.
+
         Args:
             product_info: Product data from Product Agent
                 - product_name: str
                 - ric_code: str (e.g., "PET #1", "1", "#1", "PS 6")
+                - material_name: str
                 - confidence: float
             location_info: Location data from Location Agent
                 - zip_code: str
@@ -36,264 +114,178 @@ class SynthesisAgent:
                 - local_authority: dict
                 - curbside_recycling: dict
                 - confidence: float
-            
+
         Returns:
-            Dict containing synthesis results and recommendations
+            Dict containing AI-generated synthesis results and recommendations
         """
+        print(f"♻️ SynthesisAgent.run() called")
+        print(f"   Product: {product_info.get('product_name')}")
+        print(f"   Location: {location_info.get('municipality')}, {location_info.get('state')}")
+
+        # Run the async execute method synchronously
         try:
-            # Validate inputs
-            if not product_info or not location_info:
-                return {
-                    'success': False,
-                    'error': 'Missing required information from upstream agents'
-                }
-            
-            # Determine recyclability
-            recommendation = self._determine_recyclability(
-                product_info,
-                location_info
-            )
-            
-            # Generate instructions if recyclable
-            if recommendation['is_recyclable']:
-                recommendation['instructions'] = self._create_instructions(
-                    product_info,
-                    location_info
-                )
-            
-            # Format final response
-            formatted_response = self._format_response(
-                product_info,
-                location_info,
-                recommendation
-            )
-            
-            return {
-                'success': True,
-                'agent': self.name,
-                'recommendation': recommendation,
-                'formatted_response': formatted_response
-            }
-            
-        except Exception as e:
+            result = asyncio.run(self._execute(product_info, location_info))
+            return result
+        except RuntimeError:
+            # Event loop already running in Streamlit
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(self._execute(product_info, location_info))
+                return result
+            finally:
+                loop.close()
+
+    async def _execute(
+        self,
+        product_info: Dict[str, Any],
+        location_info: Dict[str, Any]
+    ):
+        """Internal async execution method."""
+        # Validate inputs
+        if not product_info or not location_info:
             return {
                 'success': False,
-                'agent': self.name,
-                'error': str(e)
+                'error': 'Missing required information from upstream agents'
             }
-    
-    def _normalize_ric(self, ric_code: str) -> str:
-        """
-        Normalize RIC code to standard format 'MATERIAL #N'.
-        
-        Handles various formats:
-        - "6" -> "PS #6"
-        - "#6" -> "PS #6"
-        - "PS 6" -> "PS #6"
-        - "ps#6" -> "PS #6"
-        - "PET 1" -> "PET #1"
-        
-        Args:
-            ric_code: RIC code in any format
-            
-        Returns:
-            Normalized RIC code in format 'MATERIAL #N'
-        """
-        ric_code = ric_code.strip().upper()
-        
-        # Mapping of numbers to full RIC codes
-        ric_map = {
-            '1': 'PET #1',
-            '#1': 'PET #1',
-            '2': 'HDPE #2',
-            '#2': 'HDPE #2',
-            '3': 'PVC #3',
-            '#3': 'PVC #3',
-            '4': 'LDPE #4',
-            '#4': 'LDPE #4',
-            '5': 'PP #5',
-            '#5': 'PP #5',
-            '6': 'PS #6',
-            '#6': 'PS #6',
-            '7': 'OTHER #7',
-            '#7': 'OTHER #7'
-        }
-        
-        # Check if it's just a number or #number
-        if ric_code in ric_map:
-            return ric_map[ric_code]
-        
-        # Remove all spaces and extract material and number parts
-        ric_code = ric_code.replace(' ', '').replace('#', '')
-        
-        # Now we have something like "PET1" or "PS6"
-        # Split into material letters and number
-        material = ''
-        number = ''
-        for char in ric_code:
-            if char.isalpha():
-                material += char
-            elif char.isdigit():
-                number += char
-        
-        # Reconstruct with proper format
-        if material and number:
-            return f"{material} #{number}"
-        
-        # If we can't parse it, return as-is
-        return ric_code
-    
-    def _determine_recyclability(
-        self,
-        product_info: Dict[str, Any],
-        location_info: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Determine if material is recyclable based on local rules."""
-        
-        # Normalize the RIC code from product
-        raw_ric = product_info.get('ric_code', '')
-        ric_code = self._normalize_ric(raw_ric)
-        
-        curbside = location_info.get('curbside_recycling', {})
-        
-        # Normalize accepts and rejects lists
-        accepts = [self._normalize_ric(item) for item in curbside.get('accepts', [])]
-        rejects = [self._normalize_ric(item) for item in curbside.get('rejects', [])]
-        
-        # MVP: Only accept plastic materials with RIC codes
-        valid_plastics = ['PET #1', 'HDPE #2', 'PVC #3', 'LDPE #4', 
-                          'PP #5', 'PS #6', 'OTHER #7']
-        
-        if ric_code not in valid_plastics:
-            return {
-                'is_recyclable': False,
-                'confidence': 1.0,
-                'reason': 'This MVP version only supports plastic materials with Resin Identification Codes (RIC). Other materials will be supported in future updates.',
-                'instructions': [],
-                'tips': ['Check back soon for support of glass, paper, metal, and other materials!']
-            }
-        
-        # Check if explicitly rejected
-        if ric_code in rejects:
-            return {
-                'is_recyclable': False,
-                'confidence': 0.9,
-                'reason': f'{ric_code} is not accepted in your local curbside recycling program.',
-                'instructions': [],
-                'tips': []
-            }
-        
-        # Check if explicitly accepted
-        if ric_code in accepts:
-            return {
-                'is_recyclable': True,
-                'confidence': 0.95,
-                'reason': f'{ric_code} is accepted in your local curbside recycling program.'
-            }
-        
-        # Material not found in either list - uncertain
+
+        # Create detailed prompt with both sets of data
+        prompt = self._create_analysis_prompt(product_info, location_info)
+
+        # Create message
+        message = types.Content(role="user", parts=[types.Part(text=prompt)])
+
+        # Run agent and collect response
+        response_text = None
+        async for event in self.runner.run_async(
+            user_id=self.USER_ID,
+            session_id=self.SESSION_ID,
+            new_message=message
+        ):
+            if event.is_final_response():
+                response_text = event.content.parts[0].text
+                break  # Use break instead of return to properly close the generator
+
+        # Process response after generator is closed
+        if response_text:
+            # Try to parse as JSON
+            try:
+                # Remove markdown code blocks if present
+                if '```json' in response_text or '```' in response_text:
+                    response_text = response_text.replace('```json', '').replace('```', '').strip()
+
+                parsed = json.loads(response_text)
+
+                # Add success flag and agent name
+                parsed['success'] = True
+                parsed['agent'] = self.name
+
+                # The formatted_response from AI becomes the recommendation
+                if 'formatted_response' in parsed:
+                    parsed['recommendation'] = parsed['formatted_response']
+
+                return parsed
+
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON parsing failed: {e}")
+                print(f"Response content: {response_text}")
+                return {
+                    "success": False,
+                    "agent": self.name,
+                    "error": "Failed to parse synthesis response",
+                    "raw_response": response_text
+                }
+
+        # If we get here, no final response was received
         return {
-            'is_recyclable': False,
-            'confidence': 0.5,
-            'reason': f'Unable to confirm if {ric_code} is accepted locally. Please check with your local recycling facility.',
-            'instructions': [],
-            'tips': []
+            "success": False,
+            "agent": self.name,
+            "error": "No response received from synthesis agent"
         }
-    
-    def _create_instructions(
+
+    def _create_analysis_prompt(
         self,
         product_info: Dict[str, Any],
         location_info: Dict[str, Any]
-    ) -> List[str]:
-        """Generate step-by-step recycling instructions."""
-        
-        instructions = []
-        raw_ric = product_info.get('ric_code', '')
-        ric_code = self._normalize_ric(raw_ric)
-        
-        curbside = location_info.get('curbside_recycling', {})
-        special_instructions = curbside.get('special_instructions', {})
-        
-        # Normalize special instruction keys and check
-        special_found = False
-        for key, value in special_instructions.items():
-            if self._normalize_ric(key) == ric_code:
-                instructions.append(value)
-                special_found = True
-                break
-        
-        if not special_found:
-            # Default cleaning instruction
-            instructions.append("Clean and rinse the item to remove any food residue or contaminants")
-        
-        # Crushing/flattening for space
-        if ric_code in ['PET #1', 'HDPE #2', 'PP #5']:
-            instructions.append("Flatten or crush to save space in your recycling bin")
-        
-        # Add general instruction
-        instructions.append(f"Place in your curbside recycling bin")
-        
-        return instructions
-    
-    def _format_response(
-        self,
-        product_info: Dict[str, Any],
-        location_info: Dict[str, Any],
-        recommendation: Dict[str, Any]
     ) -> str:
-        """Format the final response in user-friendly markdown."""
-        
-        output = []
-        
-        # Header
-        output.append("# ♻️ Recycling Recommendation\n")
-        
-        # Product Information
-        raw_ric = product_info.get('ric_code', 'Unknown')
-        normalized_ric = self._normalize_ric(raw_ric) if raw_ric != 'Unknown' else 'Unknown'
-        
-        output.append("## 📦 Product Information")
-        output.append(f"**Product:** {product_info.get('product_name', 'Unknown')}")
-        output.append(f"**Material:** {normalized_ric}\n")
-        
-        # Location Information
-        municipality = location_info.get('municipality', 'your area')
-        state = location_info.get('state', '')
-        location_str = f"{municipality}, {state}" if state else municipality
-        output.append(f"## 📍 Location: {location_str}\n")
-        
-        # Recommendation
-        is_recyclable = recommendation.get('is_recyclable', False)
-        confidence = recommendation.get('confidence', 0)
-        reason = recommendation.get('reason', '')
-        
-        output.append("## 🎯 Recommendation")
-        
-        if is_recyclable:
-            output.append(f"**Status:** ✅ Recyclable (Confidence: {confidence*100:.0f}%)\n")
-            output.append(f"**Reason:** {reason}\n")
-            
-            # Instructions
-            instructions = recommendation.get('instructions', [])
-            if instructions:
-                output.append("## 📋 How to Recycle")
-                for i, instruction in enumerate(instructions, 1):
-                    output.append(f"{i}. {instruction}")
-                output.append("")
-        else:
-            output.append(f"**Status:** ❌ Not Recyclable\n")
-            output.append(f"**Reason:** {reason}\n")
-            
-            # Add tips if available
-            tips = recommendation.get('tips', [])
-            if tips:
-                output.append("## 💡 Tips")
-                for tip in tips:
-                    output.append(f"• {tip}")
-                output.append("")
-        
-        # Footer
-        output.append("---")
-        output.append("*This recommendation is based on your local recycling guidelines.*")
-        
-        return "\n".join(output)
+        """Create a detailed prompt for the AI agent with all context."""
+
+        # Extract product details
+        product_name = product_info.get('product_name', 'Unknown')
+        ric_code = product_info.get('ric_code', 'Unknown')
+        material_name = product_info.get('material_name', 'Unknown')
+        product_confidence = product_info.get('confidence', 0)
+
+        # Extract location details
+        municipality = location_info.get('municipality', 'Unknown')
+        state = location_info.get('state', 'Unknown')
+        zip_code = location_info.get('zip_code', 'Unknown')
+
+        # Extract recycling rules
+        curbside = location_info.get('curbside_recycling', {})
+        accepts = curbside.get('accepts', [])
+        rejects = curbside.get('rejects', [])
+        special_instructions = curbside.get('special_instructions', {})
+
+        # Extract local authority info
+        authority = location_info.get('local_authority', {})
+        authority_name = authority.get('name', 'Unknown')
+
+        prompt = f"""Analyze this recycling scenario:
+
+## Product Information
+- Product Name: {product_name}
+- Material: {material_name}
+- RIC Code: {ric_code}
+- Identification Confidence: {product_confidence}
+
+## Location Information
+- Location: {municipality}, {state} (Zip: {zip_code})
+- Managed by: {authority_name}
+
+## Local Recycling Regulations
+Accepted Materials: {', '.join(accepts) if accepts else 'None specified'}
+Rejected Materials: {', '.join(rejects) if rejects else 'None specified'}
+Special Instructions: {json.dumps(special_instructions) if special_instructions else 'None'}
+
+## Your Task
+1. Determine if {ric_code} ({material_name}) is recyclable in {municipality}, {state}
+2. Compare the RIC code against accepted/rejected lists (note: variations like "1", "#1", "PET #1" are equivalent)
+3. Check for any special handling instructions
+4. Generate specific recycling steps if recyclable
+5. Provide helpful context about why this decision was made
+
+Return your analysis as JSON with:
+- is_recyclable (boolean)
+- confidence (0-1 number)
+- reason (string explaining the decision)
+- instructions (array of strings - steps to recycle, empty if not recyclable)
+- tips (array of helpful tips)
+- formatted_response (complete markdown response for the user)
+
+The formatted_response should include:
+- Header: "# ♻️ Recycling Recommendation"
+- Product section with name and material
+- Location section
+- Clear recyclable/not recyclable status with confidence
+- Explanation of the decision based on local rules
+- Step-by-step instructions if recyclable
+- Helpful tips or alternatives if not recyclable
+- Footer noting this is based on local guidelines
+"""
+
+        return prompt
+
+    def generate_recommendation(
+        self,
+        material_info: Dict[str, Any],
+        recyclability_info: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Legacy method name for backwards compatibility.
+        Redirects to run() method.
+        """
+        return self.run(
+            product_info=material_info,
+            location_info=recyclability_info
+        )

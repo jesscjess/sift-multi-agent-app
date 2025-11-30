@@ -26,9 +26,19 @@ class LocationAgent:
 
 Your task:
 1. Receive a zip code from the user
-2. Search for the assigned residential recycling store for that zip code
-3. Retrieve recycling regulations and accepted RIC codes for that store
+2. Search for the assigned residential recycling facility/program for that zip code
+3. Find DETAILED recycling regulations including:
+   - Which specific RIC codes are accepted (look for #1, #2, #3, #4, #5, #6, #7)
+   - Which RIC codes are rejected
+   - Specific preparation rules (caps on/off, rinsing, flattening, etc.)
+   - Any material-specific instructions
 4. Return ONLY the JSON response (no markdown code blocks, no text)
+
+**Search Strategy:**
+- Look for "[zip code] recycling guidelines"
+- Look for "[municipality name] curbside recycling rules"
+- Look for the waste management company or local government recycling page
+- Find specific information about caps/lids, rinsing, and preparation requirements
 
 **If the zip code is invalid, return ONLY this JSON:**
 {"success": false, "error": "Reason it failed"}
@@ -39,13 +49,13 @@ Your task:
   "municipality": "municipality of that zipcode",
   "state": "which state does this zipcode belong to",
   "local_authority": {
-    "name": "name of the assigned residential recycle store",
-    "website": "website of the assigned residential recycle store",
-    "phone": "phone number of the assigned residential recycle store"
+    "name": "name of the waste management company or local recycling program",
+    "website": "official recycling guidelines website",
+    "phone": "customer service phone number"
   },
   "curbside_recycling": {
-    "accepts": ["RIC code 1", "RIC code 2"],
-    "rejects": ["RIC code 3", "RIC code 4"],
+    "accepts": ["PET #1", "HDPE #2", "PP #5"],
+    "rejects": ["PVC #3", "PS #6", "OTHER #7"],
     "special_instructions": "Any special instructions for recycling"
   },
   "confidence": 0.85
@@ -55,9 +65,9 @@ Rules:
 - DO NOT use markdown code blocks (no ```json or ```)
 - DO NOT add any explanatory text before or after the JSON
 - Confidence must be a number between 0 and 1 (e.g., 0.85, not "0.85")
+- The "special_instructions" should be SPECIFIC - find actual local rules, not generic advice
 - If you cannot find complete information, fill in what you can and set confidence lower
 - Only respond in English
-- Only answer questions about recycling stores, regulations, or RIC codes
 """,
             tools=[google_search]
         )
@@ -115,11 +125,12 @@ Rules:
 
         # Create prompt
         prompt = f"Find recycling information for zip code: {zip_code}"
-        
+
         # Create message
         message = types.Content(role="user", parts=[types.Part(text=prompt)])
-        
+
         # Run agent and collect response
+        response_text = None
         async for event in self.runner.run_async(
             user_id=self.USER_ID,
             session_id=self.SESSION_ID,
@@ -127,24 +138,27 @@ Rules:
         ):
             if event.is_final_response():
                 response_text = event.content.parts[0].text
-                
-                # Try to parse as JSON
-                try:
-                    # Remove markdown code blocks if present
-                    if '```json' in response_text or '```' in response_text:
-                        response_text = response_text.replace('```json', '').replace('```', '').strip()
-                    
-                    parsed = json.loads(response_text)
-                    return parsed
-                except json.JSONDecodeError as e:
-                    print(f"❌ JSON parsing failed: {e}")
-                    print(f"Response content: {response_text}")
-                    return {
-                        "success": False,
-                        "error": "Failed to parse response",
-                        "raw_response": response_text
-                    }
-        
+                break  # Use break instead of return to properly close the generator
+
+        # Process response after generator is closed
+        if response_text:
+            # Try to parse as JSON
+            try:
+                # Remove markdown code blocks if present
+                if '```json' in response_text or '```' in response_text:
+                    response_text = response_text.replace('```json', '').replace('```', '').strip()
+
+                parsed = json.loads(response_text)
+                return parsed
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON parsing failed: {e}")
+                print(f"Response content: {response_text}")
+                return {
+                    "success": False,
+                    "error": "Failed to parse response",
+                    "raw_response": response_text
+                }
+
         # If we get here, no final response was received
         return {
             "success": False,
